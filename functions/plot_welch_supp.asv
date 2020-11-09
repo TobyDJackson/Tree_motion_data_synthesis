@@ -1,0 +1,177 @@
+function h2 = plot_welch_supp(tree_in,fs_tree,wind_in,fs_wind,...
+            premultiply,butterworth,wind_label,color_in,LineStyle,p_smooth,PLOT)
+    
+    if istable(tree_in); tree_in=table2array(tree_in); end
+    if istable(wind_in); wind_in=table2array(wind_in); end
+    
+    colx=size(tree_in,2)-1;
+    coly=size(tree_in,2);
+    
+    % Prepare the data
+    tree_corrected_HP = replace_nan_with_col_mean(tree_in);
+    tree_4hz=resample(tree_corrected_HP,4,fs_tree);
+    tree_4hz=tree_4hz-mean(tree_4hz,'omitnan'); 
+    tree_corrected=cat(2,tree_4hz,hypot(tree_4hz(:,colx),tree_4hz(:,coly)));
+    
+    fs_tree=4; % overwrite this
+    lower_frequency_threshold=0.0017; % this is ten minutes
+    [b2,a2]       = butter(4,lower_frequency_threshold / 2,'high');
+    tree_4hz_HP= filtfilt(b2,a2,tree_4hz); % High Pass Filter
+    tree_corrected_HP=cat(2,tree_4hz_HP,hypot(tree_4hz_HP(:,colx),tree_4hz_HP(:,coly)));%add the resultant
+            
+    % Calcuate Welch Power spectra
+	[pxx_tree_HP,f_tree_HP] = pwelch(tree_corrected_HP,[],[],[],fs_tree); % Calculate the welch power transform for all columns
+    pxx_tree_HP(f_tree_HP>=fs_tree/2,:)=[]; f_tree_HP(f_tree_HP>=fs_tree/2)=[]; %delete the mirror half
+    
+    [pxx_tree,f_tree] = pwelch(tree_corrected_HP,[],[],[],fs_tree); % Calculate the welch power transform for all columns
+    pxx_tree(f_tree>=fs_tree/2,:)=[]; f_tree(f_tree>=fs_tree/2)=[]; %delete the mirror half
+    
+    if fs_wind>0 % If there is wind data
+        wind_corrected = replace_nan_with_col_mean(wind_in);
+        wind_4hz=resample(wind_corrected,4,fs_wind);
+        fs_wind=4; % overwrite this
+        [pxx_wind,f_wind] = pwelch(wind_4hz,[],[],[],fs_wind); % Calculate the welch power transform for all columns
+        pxx_wind(f_wind>=fs_wind/2,:)=[]; f_wind(f_wind>=fs_wind/2)=[]; %delete the mirror half
+    end
+    
+    if premultiply==1 % pre-multiply by f as suggested by Ebba
+        pxx_tree_HP=cat(2,f_tree_HP.*pxx_tree_HP(:,1),f_tree_HP.*pxx_tree_HP(:,2),f_tree_HP.*pxx_tree_HP(:,3));
+        if fs_wind>0
+            pxx_wind=cat(2,f_wind.*pxx_wind);
+        end
+    end
+    
+    % Calculate transfer functions
+    
+        pxx_tf_x=pxx_tree_HP(:,colx)./pxx_tree_HP(:,1); % Energy transfer from the wind to the tree
+        pxx_tf_y=pxx_tree_HP(:,coly)./pxx_tree_HP(:,1);
+        pxx_tf_abs=pxx_tree_HP(:,coly+1)./pxx_tree_HP(:,1); % combined column 
+
+        
+    %% Plotting
+    
+    % Transfer function of combined tree motion
+    if PLOT==1 
+        xlim([log(0.001) log(fs_tree/2)]);
+        %[fit_result, gof] = fit_spline_pxx(log(f_tree),log(pxx_tf_abs),1,p_smooth);
+        %h1=plot( fit_result ); legend off;
+        %set(h1,'color',color_in,'LineWidth',1.2,'LineStyle',LineStyle) 
+        h2=scatter( log(f_tree_HP),log(pxx_tf_abs) ,5,color_in,'filled'); hold on;
+        xlim([log(0.001) log(10)]);
+    end
+    
+    % Transfer function of separate tree motion channels
+    if PLOT==2
+        xlim([log(0.001) log(fs_tree/2)]);
+        [fit_result_x, gof] = fit_spline_pxx(log(f_tree_HP),log(pxx_tf_x),1,p_smooth);
+        h1=plot( fit_result_x ); legend off; hold on;
+        set(h1,'color',color_in,'LineWidth',1,'LineStyle','-')
+        [fit_result_y, gof] = fit_spline_pxx(log(f_tree_HP),log(pxx_tf_y),1,p_smooth);
+        h2=plot( fit_result_y ); legend off;
+        set(h2,'color',color_in,'LineWidth',1.2,'LineStyle',':')
+        xlim([log(0.001) log(10)]);
+    end
+    
+    % Power spectrum of combined tree motion + wind (if available)
+    if PLOT==3
+        if 1==2; %fs_wind>0;
+            xlim([log(0.001) log(fs_wind/2)]);
+            [fit_result_wind, gof] = fit_spline_pxx(log(f_wind),log(pxx_wind(:,1)),1,p_smooth);
+            h1=plot( fit_result_wind ); legend off; hold on;
+            set(h1,'color','black','LineWidth',1.5,'LineStyle','-')  
+        end
+        
+        xlim([log(0.001) log(fs_tree/2)]);
+        [fit_result_abs, gof] = fit_spline_pxx(log(f_tree_HP),log(pxx_tree_HP(:,coly+1)),1,p_smooth);
+        h2=plot( fit_result_abs ); legend off; hold on;
+        set(h2,'color',color_in,'LineWidth',1.2,'LineStyle',LineStyle) 
+        xlim([log(0.001) log(10)]);
+    end
+    
+    % Power spectrum of separate tree motion + wind (if available)
+    if PLOT==4
+        if 1==2; %fs_wind>0
+            xlim([log(0.001) log(fs_wind/2)]);
+            [fit_result_wind, gof] = fit_spline_pxx(log(f_wind),log(pxx_wind(:,1)),1,p_smooth);
+            h1=plot( fit_result_wind ); legend off; hold on;
+            set(h1,'color',color_in,'LineWidth',1.5,'LineStyle','-')
+        end
+        xlim([log(0.001) log(fs_tree/2)]);
+        [fit_result_abs, gof] = fit_spline_pxx(log(f_tree_HP),log(pxx_tree_HP(:,colx)),1,p_smooth);
+        h2=plot( fit_result_abs ); legend off; hold on;
+        set(h2,'color',color_in,'LineWidth',1.2,'LineStyle',LineStyle)
+        [fit_result_abs, gof] = fit_spline_pxx(log(f_tree_HP),log(pxx_tree_HP(:,coly)),1,p_smooth);
+        h2=plot( fit_result_abs ); legend off; hold on;
+        set(h2,'color',color_in,'LineWidth',1.2,'LineStyle',LineStyle)
+    
+        xlim([log(0.001) log(10)]);
+    end
+    
+    % POINTS NOT LINES Power spectrum of separate tree motion + wind (if available)
+    if PLOT==5
+        if 1==2; %fs_wind>0
+            xlim([log(0.001) log(fs_wind/2)]);
+            %[fit_result_wind, gof] = fit_spline_pxx(,1,p_smooth);
+            h1=plot( log(f_wind),log(pxx_wind(:,1)) ); legend off; hold on;
+            set(h1,'color','black')
+        end
+        xlim([log(0.001) log(fs_tree/2)]);
+        h2=scatter( log(f_tree_HP),log(pxx_tree_HP(:,colx)) ,5,color_in,'filled'); hold on;
+        %h2=scatter( log(f_tree),log(pxx_tree(:,coly)) ,5,color_in,'filled'); legend off; 
+        xlim([log(0.001) log(10)]);
+    end
+ 
+      % POINTS  Power spectrum of COMBINED tree motion + wind (if available)
+    if PLOT==6
+        if 1==2; %fs_wind>0
+            xlim([log(0.001) log(fs_wind/2)]);
+            h1=plot( log(f_wind),log(pxx_wind(:,1)) ); legend off; hold on;
+            set(h1,'color','black')
+        end
+        xlim([log(0.001) log(fs_tree/2)]);
+        h2=scatter( log(f_tree_HP),log(pxx_tree_HP(:,coly+1)) ,5,color_in,'filled'); legend off; hold on;
+        xlim([log(0.001) log(10)]);
+    end
+    
+    % EVENLY SPACED POINTS  Power spectrum of COMBINED tree motion + wind (if available)
+    if PLOT==7
+        if 1==2; %fs_wind>0
+            xlim([log(0.001) log(fs_wind/2)]);
+            h1=plot( log(f_wind),log(pxx_wind(:,1)) ); legend off; hold on;
+            set(h1,'color','black')
+        end
+        xlim([log(0.001) log(fs_tree/2)]);
+        [z] = binned_log_means(f_tree_HP,pxx_tree_HP(:,coly+1),100,0.001);
+        h2=scatter( log(z(:,1)),log(z(:,2)) ,5,color_in,'filled'); legend off; hold on;
+        xlim([log(0.001) log(10)]);
+    end
+    
+    
+    % Plot lines - with and without butterworth filter for a single channel
+    if PLOT==8
+        xlim([log(0.001) log(fs_tree/2)]);
+        [fit_result_abs, gof] = fit_spline_pxx(log(f_tree_HP),log(pxx_tree_HP(:,colx)),1,p_smooth);
+        h2=plot( fit_result_abs ); legend off; hold on;
+        set(h2,'color',color_in,'LineWidth',1.2,'LineStyle',LineStyle)
+        [fit_result_abs, gof] = fit_spline_pxx(log(f_tree),log(pxx_tree(:,colx)),1,p_smooth);
+        h2=plot( fit_result_abs ); legend off; hold on;
+        set(h2,'color',color_in,'LineWidth',1.2,'LineStyle',LineStyle)
+    
+        xlim([log(0.001) log(10)]);
+    end
+    
+    xt=[0.001 0.01 0.1 0.5 2 5 10];    xticks(log(xt));  
+    xticklabels({num2str(xt(1)) ,num2str(xt(2)), num2str(xt(3)), num2str(xt(4)) ,num2str(xt(5)) ,num2str(xt(6)),num2str(xt(7))}); 
+    %grid off; 
+    ax = gca; ax.XGrid = 'on';
+    xlabel ''; ylabel '';
+    %yticklabels '';
+    
+    if wind_label==1;
+        textLoc(strcat('WS=',num2str(round(mean(wind_in(:,1),'omitnan'),2))));
+    end
+    %ylabel('Power (dB)'); 
+    xlabel('Frequency (Hz)');    
+    %xlabel '';
+end
+
